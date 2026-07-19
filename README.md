@@ -1,23 +1,18 @@
 # ORAL EXAM AMH
 
-Independent assistant for Australian intern pharmacist oral-exam preparation.
+Independent starter for an Australian intern pharmacist oral-exam assistant.
 
-## Repository boundary
-
-This is the only repository that may be modified for this project. All other existing repositories, apps, APIs and websites are read-only references unless the user explicitly changes that rule.
+## Access boundary
+Only this repository may be modified. Existing repositories, apps, APIs and websites are reference-only.
 
 ## MVP
+- Part A / B / C selector
+- Search by Case ID, page, medicine or pasted scenario
+- Structured oral-exam output
+- Exact reference section
+- Local-first retrieval and cache to reduce AI usage
 
-- Part A: OTC scenarios
-- Part B: legal and ethical scenarios
-- Part C: clinical and prescription scenarios
-- Search by Case ID, page number, medicine name or pasted scenario
-- Structured oral-exam answer
-- Exact references
-- Local-first retrieval and caching to minimise AI usage
-
-## Run locally
-
+## Run
 ```bash
 pnpm install
 pnpm dev
