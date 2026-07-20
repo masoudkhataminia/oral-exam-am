@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildAnswerTemplate } from "@/lib/answer-template";
 import { analyseWithOpenAI } from "@/lib/openai-responses";
+import { consumeGenerationAllowance } from "@/lib/rate-limit";
 import {
   findSavedAnswer,
   listSavedAnswers,
@@ -71,10 +72,28 @@ export async function POST(request: Request) {
       );
     }
 
+    const allowance = consumeGenerationAllowance(request);
+    const rateHeaders = {
+      "X-RateLimit-Limit": String(allowance.limit),
+      "X-RateLimit-Remaining": String(allowance.remaining),
+      "X-RateLimit-Reset": String(Math.ceil(allowance.resetAt / 1_000)),
+    };
+
+    if (!allowance.allowed) {
+      const retryAfter = Math.max(1, Math.ceil((allowance.resetAt - Date.now()) / 1_000));
+      return NextResponse.json(
+        { error: "Fresh-answer limit reached. Saved answers remain available; try Refresh again later." },
+        {
+          status: 429,
+          headers: { ...rateHeaders, "Retry-After": String(retryAfter) },
+        },
+      );
+    }
+
     try {
       const generated = await analyseWithOpenAI(input.part, input.query);
       const saved = await saveFreshAnswer(identity, generated);
-      return NextResponse.json(saved);
+      return NextResponse.json(saved, { headers: rateHeaders });
     } catch (error) {
       console.error("OpenAI analysis failed", error);
       return NextResponse.json(
@@ -83,7 +102,7 @@ export async function POST(request: Request) {
           "safe-fallback",
           "The AI service was unavailable. This fallback was not saved as a completed answer.",
         ),
-        { status: 503 },
+        { status: 503, headers: rateHeaders },
       );
     }
   } catch (error) {
