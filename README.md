@@ -1,41 +1,62 @@
 # ORAL EXAM AMH
 
-Independent assistant for Australian intern pharmacist oral-exam preparation.
+Public study workspace for Australian intern pharmacist oral-exam preparation.
 
 ## Access boundary
 
 Only this repository may be modified. Existing repositories, apps, APIs and websites are reference-only.
 
-## Current MVP
+## Current workspace
 
-- Part A / B / C selector
-- Search by Case ID, page, medicine or pasted scenario
-- Structured eight-section oral-exam output
-- OpenAI Responses API integration
-- Optional OpenAI File Search over indexed Part A/B/C documents
-- Safe local fallback when the API is unavailable
-- No invented AMH, legal or guideline citation when evidence is unavailable
+- No login; the site is public.
+- Part A, Part B and Part C selector.
+- Searchable and selectable Case ID / question fields.
+- Part A and Part C preserve the source-PDF Case ID order.
+- Part B questions remain sequential from 1 to 171.
+- The selected source reference is copied into an editable question box.
+- Answers are concise, question-specific and intended for oral delivery.
+- `More details` remains collapsed for optional educational reasoning.
+- Successful answers are stored automatically on the server.
+- The same question reuses its saved answer without another OpenAI request.
+- `Refresh` forces a new search and saves a new version.
+- Saved-answer history is available from other devices using the same deployment.
+- Fresh public generation is rate-limited; cached answers do not consume that allowance.
+- Unsupported clinical, legal or citation claims must be identified rather than invented.
 
-## Required environment variables
+## Environment
 
-Copy `.env.example` to `.env.local` and add:
+Copy `.env.example` to `.env.local` and configure:
 
 ```bash
 OPENAI_API_KEY=your_project_api_key
 OPENAI_MODEL=gpt-5-mini
 OPENAI_VECTOR_STORE_ID=vs_your_vector_store_id
 AMH_REFERENCE_MODE=file-search
+ANSWER_STORE_PATH=/data/oral-exam-answers.json
+RATE_LIMIT_PER_HOUR=20
 ```
 
-`OPENAI_VECTOR_STORE_ID` is optional. Without it, the app can reason with the supplied case but cannot claim that it searched the indexed reference documents.
+Keep `OPENAI_API_KEY` server-side. Never place it in a variable prefixed with `NEXT_PUBLIC_`.
 
-## Recommended source setup
+`OPENAI_VECTOR_STORE_ID` should point to the approved Part A, Part B and Part C reference documents. Without an indexed source, the app must not claim that it searched those documents.
 
-Create one OpenAI vector store and upload the approved Part A, Part B and Part C source documents once. The app then uses hosted File Search instead of building a custom embedding database.
+## Persistent server storage
 
-Do not upload or reproduce licensed AMH content unless your licence and the applicable terms permit that use. AMH Online should be treated as an authorised reference source, not scraped or copied automatically without permission.
+The default development store is `.data/oral-exam-answers.json`. In production, mount a persistent server volume and set:
 
-## Run
+```bash
+ANSWER_STORE_PATH=/data/oral-exam-answers.json
+```
+
+Without a persistent volume, a hosting rebuild or instance replacement may remove saved answers. The mounted `/data` directory must be writable by the application process and must not be publicly served.
+
+## Public deployment
+
+Deploy the Next.js server first, then point the Cloudflare subdomain to that deployment. Configure HTTPS, proxying and an additional Cloudflare rate-limit rule before sharing the public URL.
+
+Do not store or submit patient-identifying information. Do not scrape or reproduce licensed AMH content unless the licence and applicable terms permit it. Exact licensed wording should remain in the approved private reference source.
+
+## Run locally
 
 ```bash
 pnpm install
