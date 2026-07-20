@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertTriangleIcon,
   BookOpenIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
@@ -25,6 +26,7 @@ export type AnalyseResult = {
   version: number;
   mode?: string;
   sources?: Array<{ filename: string; score?: number }>;
+  warning?: string;
   error?: string;
 };
 
@@ -123,12 +125,26 @@ export function AnswerCard({
       ) : (
         <div className="p-5">
           <div className="mb-4 flex flex-wrap items-center gap-2 text-[11px]">
-            <span className={cn("rounded-full px-2.5 py-1 font-medium", result.cached ? "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300")}>
-              {result.cached ? "Saved answer" : "Fresh answer"}
+            <span className={cn(
+              "rounded-full px-2.5 py-1 font-medium",
+              result.version === 0
+                ? "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
+                : result.cached
+                  ? "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300"
+                  : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
+            )}>
+              {result.version === 0 ? "Preview · not saved" : result.cached ? "Saved answer" : "Fresh answer"}
             </span>
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-500 dark:bg-slate-800 dark:text-slate-300">Version {result.version}</span>
+            {result.version > 0 && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-500 dark:bg-slate-800 dark:text-slate-300">Version {result.version}</span>}
             <span className="inline-flex items-center gap-1 text-slate-400"><Clock3Icon className="size-3" /> {formatDate(result.updatedAt)}</span>
           </div>
+
+          {result.warning && (
+            <div className="mb-4 flex gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
+              <span>{result.warning}</span>
+            </div>
+          )}
 
           <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950/50">
             <AnswerText text={sections.main} />
