@@ -3,10 +3,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { OralPart } from "@/lib/case-catalog";
 
-export type StoredSource = {
-  filename: string;
-  score?: number;
-};
+export type StoredSource = { filename: string; score?: number };
 
 type StoredVersion = {
   version: number;
@@ -28,9 +25,7 @@ type StoredRecord = {
   versions: StoredVersion[];
 };
 
-type StoreFile = {
-  records: StoredRecord[];
-};
+type StoreFile = { records: StoredRecord[] };
 
 export type PublicAnswer = {
   key: string;
@@ -81,7 +76,6 @@ function makeKey(identity: AnswerIdentity) {
     cleanIdentifier(identity.itemNumber) ?? "all",
     normalizeQuery(identity.query),
   ].join("|");
-
   return createHash("sha256").update(raw).digest("hex").slice(0, 24);
 }
 
@@ -90,11 +84,9 @@ function tokenSimilarity(left: string, right: string) {
   const a = new Set(left.split(" ").filter(Boolean));
   const b = new Set(right.split(" ").filter(Boolean));
   if (!a.size || !b.size) return 0;
-
   let intersection = 0;
   for (const token of a) if (b.has(token)) intersection += 1;
-  const union = new Set([...a, ...b]).size;
-  return intersection / union;
+  return intersection / new Set([...a, ...b]).size;
 }
 
 async function readStore(): Promise<StoreFile> {
@@ -119,7 +111,6 @@ async function writeStore(store: StoreFile) {
 function latest(record: StoredRecord, cached: boolean): PublicAnswer {
   const version = record.versions.at(-1);
   if (!version) throw new Error("Saved answer has no version");
-
   return {
     key: record.key,
     part: record.part,
@@ -146,8 +137,7 @@ function sameStructuredLocation(record: StoredRecord, identity: AnswerIdentity) 
 
 export async function findSavedAnswer(identity: AnswerIdentity) {
   const store = await readStore();
-  const key = makeKey(identity);
-  const exact = store.records.find((record) => record.key === key);
+  const exact = store.records.find((record) => record.key === makeKey(identity));
   if (exact) return latest(exact, true);
 
   const normalized = normalizeQuery(identity.query);
@@ -156,7 +146,6 @@ export async function findSavedAnswer(identity: AnswerIdentity) {
     .map((record) => ({ record, score: tokenSimilarity(record.normalizedQuery, normalized) }))
     .filter((candidate) => candidate.score >= 0.94)
     .sort((a, b) => b.score - a.score)[0]?.record;
-
   return nearMatch ? latest(nearMatch, true) : null;
 }
 
@@ -165,8 +154,7 @@ export async function saveFreshAnswer(
   generated: { answer: string; mode?: string; sources?: StoredSource[] },
 ) {
   let output: PublicAnswer | null = null;
-
-  writeQueue = writeQueue.then(async () => {
+  const operation = writeQueue.catch(() => undefined).then(async () => {
     const store = await readStore();
     const key = makeKey(identity);
     const now = new Date().toISOString();
@@ -197,12 +185,12 @@ export async function saveFreshAnswer(
       sources: generated.sources ?? [],
       createdAt: now,
     });
-
     await writeStore(store);
     output = latest(record, false);
   });
 
-  await writeQueue;
+  writeQueue = operation.catch(() => undefined);
+  await operation;
   if (!output) throw new Error("The generated answer could not be saved");
   return output;
 }
