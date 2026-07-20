@@ -1,5 +1,5 @@
-import { OralExamShell } from "@/components/oral-exam/oral-exam-shell";
+import { ExamWorkspace } from "@/components/oral-exam/exam-workspace";
 
 export default function Home() {
-  return <OralExamShell />;
+  return <ExamWorkspace />;
 }
