@@ -16,7 +16,10 @@ import { AnswerCard, type AnalyseResult } from "@/components/oral-exam/answer-ca
 import { getCatalogForPart, type CatalogEntry, type OralPart } from "@/lib/case-catalog";
 import { cn } from "@/lib/utils";
 
-const partMeta: Record<OralPart, { label: string; title: string; subtitle: string; icon: typeof ClipboardCheckIcon }> = {
+const partMeta: Record<
+  OralPart,
+  { label: string; title: string; subtitle: string; icon: typeof ClipboardCheckIcon }
+> = {
   A: { label: "Part A", title: "OTC & Self-care", subtitle: "Symptoms, referral and counselling", icon: ClipboardCheckIcon },
   B: { label: "Part B", title: "Legal & Professional Practice", subtitle: "Law, ethics, records and escalation", icon: ScaleIcon },
   C: { label: "Part C", title: "Clinical & Prescription Review", subtitle: "Screening, intervention and monitoring", icon: StethoscopeIcon },
@@ -38,10 +41,16 @@ export function ExamWorkspace() {
   const filteredCatalog = useMemo(() => {
     const needle = catalogSearch.trim().toLowerCase();
     if (!needle) return catalog;
-    return catalog.filter((entry) => entry.caseId.toLowerCase().includes(needle) || entry.title.toLowerCase().includes(needle));
+    return catalog.filter(
+      (entry) =>
+        entry.caseId.toLowerCase().includes(needle) ||
+        entry.title.toLowerCase().includes(needle),
+    );
   }, [catalog, catalogSearch]);
 
-  useEffect(() => { void loadHistory(); }, []);
+  useEffect(() => {
+    void loadHistory();
+  }, []);
 
   async function loadHistory() {
     setHistoryLoading(true);
@@ -68,6 +77,7 @@ export function ExamWorkspace() {
 
   function selectEntry(entry: CatalogEntry) {
     setCaseNumber(entry.caseId);
+    setItemNumber("");
     setCatalogSearch(entry.caseId);
     setQuery(entry.prompt);
     setResult(null);
@@ -78,14 +88,19 @@ export function ExamWorkspace() {
     setCaseNumber(value);
     setCatalogSearch(value);
     setResult(null);
-    const exact = catalog.find((entry) => entry.caseId.toLowerCase() === value.trim().toLowerCase());
+    setError("");
+    const exact = catalog.find(
+      (entry) => entry.caseId.toLowerCase() === value.trim().toLowerCase(),
+    );
     if (exact) setQuery(exact.prompt);
   }
 
   function submittedQuery() {
     if (query.trim()) return query.trim();
     if (part === "B" && caseNumber) return `Part B question ${caseNumber}`;
-    if (caseNumber) return `Part ${part}, Case ID ${caseNumber}${itemNumber ? `, Case item ${itemNumber}` : ""}`;
+    if (caseNumber) {
+      return `Part ${part}, Case ID ${caseNumber}${itemNumber ? `, Case item ${itemNumber}` : ""}`;
+    }
     return "";
   }
 
@@ -111,9 +126,15 @@ export function ExamWorkspace() {
         }),
       });
       const payload = (await response.json()) as AnalyseResult;
-      if (!response.ok) throw new Error(payload.error || "The answer could not be generated.");
+
+      if (!response.ok) {
+        if (payload.answer) setResult(payload);
+        setError(payload.error || payload.warning || "The answer could not be generated.");
+        return;
+      }
+
       setResult(payload);
-      await loadHistory();
+      if (payload.version > 0) await loadHistory();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The answer could not be generated.");
     } finally {
@@ -139,10 +160,12 @@ export function ExamWorkspace() {
       <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
         <div className="mx-auto flex h-16 max-w-[1500px] items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-sm"><SparklesIcon className="size-4" /></div>
+            <div className="flex size-10 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-sm">
+              <SparklesIcon className="size-4" />
+            </div>
             <div>
               <div className="text-sm font-semibold tracking-tight">ORAL EXAM AMH</div>
-              <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">AHPRA exam workspace</div>
+              <div className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Australian intern pharmacist workspace</div>
             </div>
           </div>
           <div className="hidden items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 sm:flex dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-200">
@@ -160,7 +183,17 @@ export function ExamWorkspace() {
                 const meta = partMeta[id];
                 const Icon = meta.icon;
                 return (
-                  <button key={id} type="button" onClick={() => changePart(id)} className={cn("flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition", part === id ? "bg-emerald-50 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-100" : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900")}>
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => changePart(id)}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition",
+                      part === id
+                        ? "bg-emerald-50 text-emerald-950 dark:bg-emerald-950/60 dark:text-emerald-100"
+                        : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900",
+                    )}
+                  >
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-current/15 bg-white/70 dark:bg-slate-950/40"><Icon className="size-4" /></span>
                     <span className="min-w-0"><span className="block text-sm font-semibold">{meta.label}</span><span className="mt-0.5 block truncate text-[11px] opacity-65">{meta.title}</span></span>
                   </button>
@@ -176,12 +209,17 @@ export function ExamWorkspace() {
                 <div className="flex items-center gap-2 px-3 py-4 text-xs text-slate-400"><Loader2Icon className="size-3.5 animate-spin" /> Loading…</div>
               ) : history.length === 0 ? (
                 <p className="rounded-2xl border border-dashed border-slate-200 px-3 py-5 text-center text-xs leading-5 text-slate-400 dark:border-slate-800">Generated answers will appear here.</p>
-              ) : history.map((item) => (
-                <button key={item.key} type="button" onClick={() => openSaved(item)} className="w-full rounded-xl px-3 py-2.5 text-left hover:bg-slate-100 dark:hover:bg-slate-900">
-                  <div className="flex items-center gap-2"><span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.part}{item.caseNumber ?? ""}</span><span className="truncate text-xs font-semibold">{item.caseNumber ? (item.part === "B" ? `Question ${item.caseNumber}` : `Case ${item.caseNumber}`) : "Custom case"}</span></div>
-                  <p className="mt-1 max-h-8 overflow-hidden text-[11px] leading-4 text-slate-400">{item.query}</p>
-                </button>
-              ))}
+              ) : (
+                history.map((item) => (
+                  <button key={item.key} type="button" onClick={() => openSaved(item)} className="w-full rounded-xl px-3 py-2.5 text-left hover:bg-slate-100 dark:hover:bg-slate-900">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.part}{item.caseNumber ?? ""}</span>
+                      <span className="truncate text-xs font-semibold">{item.caseNumber ? (item.part === "B" ? `Question ${item.caseNumber}` : `Case ${item.caseNumber}`) : "Custom case"}</span>
+                    </div>
+                    <p className="mt-1 max-h-8 overflow-hidden text-[11px] leading-4 text-slate-400">{item.query}</p>
+                  </button>
+                ))
+              )}
             </div>
           </section>
 
@@ -190,10 +228,7 @@ export function ExamWorkspace() {
 
         <main className="space-y-5">
           <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-            <div className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/70">
-              <h1 className="text-base font-semibold">{partMeta[part].title}</h1>
-              <p className="mt-1 text-xs text-slate-400">{partMeta[part].subtitle}</p>
-            </div>
+            <div className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/70"><h1 className="text-base font-semibold">{partMeta[part].title}</h1><p className="mt-1 text-xs text-slate-400">{partMeta[part].subtitle}</p></div>
             <div className="space-y-4 p-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="space-y-2">
@@ -220,7 +255,7 @@ export function ExamWorkspace() {
                 <div className="mb-2 flex items-center justify-between"><div><p className="text-xs font-semibold">Ordered source list</p><p className="text-[11px] text-slate-400">Search by number, Case ID or wording.</p></div><span className="text-[11px] text-slate-400">{filteredCatalog.length} items</span></div>
                 <div className="relative mb-2"><SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-400" /><input value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder={part === "B" ? "Search 11 or scenario wording" : "Search Case ID or scenario"} className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-950" /></div>
                 <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
-                  {filteredCatalog.slice(0, 100).map((entry) => (
+                  {filteredCatalog.map((entry) => (
                     <button key={`${entry.part}-${entry.caseId}`} type="button" onClick={() => selectEntry(entry)} className={cn("flex w-full gap-3 rounded-xl px-3 py-2.5 text-left transition", caseNumber.toLowerCase() === entry.caseId.toLowerCase() ? "bg-emerald-100/80 dark:bg-emerald-950/60" : "hover:bg-white dark:hover:bg-slate-900")}>
                       <span className="mt-0.5 min-w-11 rounded-md bg-white px-1.5 py-0.5 text-center text-[10px] font-bold text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">{entry.caseId}</span>
                       <span className="max-h-10 overflow-hidden text-xs leading-5 text-slate-600 dark:text-slate-300">{entry.title}</span>
@@ -232,7 +267,7 @@ export function ExamWorkspace() {
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-            <div className="mb-3"><h2 className="text-sm font-semibold">Question or case text</h2><p className="mt-1 text-xs text-slate-400">Review, paste or edit the exact wording before generating.</p></div>
+            <div className="mb-3"><h2 className="text-sm font-semibold">Question or case text</h2><p className="mt-1 text-xs text-slate-400">Review or edit the source reference. Exact licensed wording is retrieved from the approved private source.</p></div>
             <textarea value={query} onChange={(event) => { setQuery(event.target.value); setResult(null); }} rows={11} placeholder="Select a source question above or paste a new case here…" className="min-h-60 w-full resize-y rounded-2xl border border-slate-200 bg-slate-50/50 p-4 text-sm leading-6 outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950/60 dark:focus:bg-slate-950 dark:focus:ring-emerald-950" />
             {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">{error}</p>}
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
