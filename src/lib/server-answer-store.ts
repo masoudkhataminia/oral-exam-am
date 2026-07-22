@@ -152,9 +152,8 @@ export async function findSavedAnswer(identity: AnswerIdentity) {
 export async function saveFreshAnswer(
   identity: AnswerIdentity,
   generated: { answer: string; mode?: string; sources?: StoredSource[] },
-) {
-  let output: PublicAnswer | null = null;
-  const operation = writeQueue.catch(() => undefined).then(async () => {
+): Promise<PublicAnswer> {
+  const operation = writeQueue.catch(() => undefined).then(async (): Promise<PublicAnswer> => {
     const store = await readStore();
     const key = makeKey(identity);
     const now = new Date().toISOString();
@@ -186,13 +185,14 @@ export async function saveFreshAnswer(
       createdAt: now,
     });
     await writeStore(store);
-    output = latest(record, false);
+    return latest(record, false);
   });
 
-  writeQueue = operation.catch(() => undefined);
-  await operation;
-  if (!output) throw new Error("The generated answer could not be saved");
-  return output;
+  writeQueue = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  return operation;
 }
 
 export async function listSavedAnswers(limit = 50) {
