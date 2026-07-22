@@ -11,13 +11,18 @@ Only this repository may be modified. Existing repositories, apps, APIs and webs
 - No login; the site is public.
 - Part A, Part B and Part C selector.
 - Searchable and selectable Case ID / question fields.
-- Part A and Part C preserve the source-PDF Case ID order.
+- Part A preserves all 165 Case IDs in the source-PDF order.
+- Part C preserves all 158 Case IDs in the source-PDF order.
 - Part B questions remain sequential from 1 to 171.
-- The selected source reference is copied into an editable question box.
+- Part A and Part C use the real source structure: `Case Only` or `Case + Information`; they do not use invented numbered case items.
+- The detailed source page is stored for every Part A and Part C Case ID; Part A also stores its exact Case Only page.
+- The selected source filename, page and view are copied into an editable question box.
+- Exact full scenario wording remains in the approved private indexed source rather than the public repository.
 - Answers are concise, question-specific and intended for oral delivery.
 - `More details` remains collapsed for optional educational reasoning.
+- File Search and answer-generation stages stream live to the interface.
 - Successful answers are stored automatically on the server.
-- The same question reuses its saved answer without another OpenAI request.
+- The same question and case view reuse their saved answer without another OpenAI request.
 - `Refresh` forces a new search and saves a new version.
 - Saved-answer history is available from other devices using the same deployment.
 - Fresh public generation is rate-limited; cached answers do not consume that allowance.
