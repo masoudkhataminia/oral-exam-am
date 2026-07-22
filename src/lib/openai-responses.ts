@@ -6,19 +6,27 @@ import {
 } from "@/lib/oral-answer-framework";
 import { buildOralSystemPrompt, type OralPart } from "@/lib/oral-system-prompt";
 
-type RetrievedSource = {
+export type RetrievedSource = {
   fileId?: string;
   filename: string;
   score?: number;
   text?: string;
 };
 
-type OpenAIAnswer = {
+export type OpenAIAnswer = {
   answer: string;
   mode: "openai" | "openai-file-search";
   sources: RetrievedSource[];
   model: string;
 };
+
+export type AnalysisProgress =
+  | {
+      type: "status";
+      stage: "connecting" | "searching" | "drafting" | "validating";
+      message: string;
+    }
+  | { type: "source"; source: RetrievedSource };
 
 type ResponseContent = {
   type?: string;
@@ -42,6 +50,15 @@ type ResponsesPayload = {
   error?: { message?: string };
 };
 
+type ResponsesStreamEvent = {
+  type?: string;
+  delta?: string;
+  item?: { type?: string };
+  response?: ResponsesPayload;
+  error?: { message?: string };
+  [key: string]: unknown;
+};
+
 function extractOutputText(payload: ResponsesPayload): string {
   if (typeof payload.output_text === "string" && payload.output_text.trim()) {
     return payload.output_text.trim();
@@ -59,6 +76,16 @@ function extractOutputText(payload: ResponsesPayload): string {
   return chunks.join("\n").trim();
 }
 
+function mergeSource(target: Map<string, RetrievedSource>, source: RetrievedSource) {
+  const key = source.fileId || source.filename;
+  const existing = target.get(key);
+  if (!existing || (source.score ?? 0) > (existing.score ?? 0)) {
+    target.set(key, source);
+    return true;
+  }
+  return false;
+}
+
 function extractSources(payload: ResponsesPayload): RetrievedSource[] {
   const unique = new Map<string, RetrievedSource>();
 
@@ -67,19 +94,44 @@ function extractSources(payload: ResponsesPayload): RetrievedSource[] {
 
     for (const result of item.results ?? []) {
       if (!result.filename) continue;
-      const existing = unique.get(result.filename);
-      if (!existing || (result.score ?? 0) > (existing.score ?? 0)) {
-        unique.set(result.filename, {
-          fileId: result.file_id,
-          filename: result.filename,
-          score: result.score,
-          text: result.text,
-        });
-      }
+      mergeSource(unique, {
+        fileId: result.file_id,
+        filename: result.filename,
+        score: result.score,
+        text: result.text,
+      });
     }
   }
 
   return [...unique.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+}
+
+function collectSourcesFromUnknown(
+  value: unknown,
+  target: Map<string, RetrievedSource>,
+  onNewSource?: (source: RetrievedSource) => void,
+) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectSourcesFromUnknown(item, target, onNewSource);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+
+  const record = value as Record<string, unknown>;
+  const filename = record.filename;
+  if (typeof filename === "string" && filename.trim()) {
+    const source: RetrievedSource = {
+      fileId: typeof record.file_id === "string" ? record.file_id : undefined,
+      filename,
+      score: typeof record.score === "number" ? record.score : undefined,
+      text: typeof record.text === "string" ? record.text : undefined,
+    };
+    if (mergeSource(target, source)) onNewSource?.(source);
+  }
+
+  for (const child of Object.values(record)) {
+    if (child !== value) collectSourcesFromUnknown(child, target, onNewSource);
+  }
 }
 
 function referenceTokens(value: string) {
@@ -149,13 +201,8 @@ function parseStructuredAnswer(raw: string): StructuredOralAnswer {
   }
 }
 
-export async function analyseWithOpenAI(part: OralPart, query: string): Promise<OpenAIAnswer> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
-
-  const model = process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
+function buildRequestBody(part: OralPart, query: string, stream: boolean) {
   const vectorStoreId = process.env.OPENAI_VECTOR_STORE_ID?.trim();
-
   const tools = vectorStoreId
     ? [
         {
@@ -166,36 +213,62 @@ export async function analyseWithOpenAI(part: OralPart, query: string): Promise<
       ]
     : undefined;
 
+  return {
+    model: process.env.OPENAI_MODEL?.trim() || "gpt-5-mini",
+    store: false,
+    stream,
+    instructions: buildOralSystemPrompt(part),
+    input: `Exam part: ${part}\n\nCase or question:\n${query}`,
+    reasoning: { effort: "low" },
+    max_output_tokens: 3000,
+    text: {
+      format: {
+        type: "json_schema",
+        name: "oral_exam_answer",
+        description: "A concise, evidence-grounded Australian intern pharmacist oral-exam answer.",
+        strict: true,
+        schema: oralAnswerJsonSchema,
+      },
+    },
+    ...(tools
+      ? {
+          tools,
+          tool_choice: "auto",
+          include: ["file_search_call.results"],
+        }
+      : {}),
+  };
+}
+
+function finalizeAnswer(
+  rawAnswer: string,
+  sources: RetrievedSource[],
+  model: string,
+  vectorStoreId?: string,
+): OpenAIAnswer {
+  if (!rawAnswer.trim()) throw new Error("OpenAI returned no answer text");
+  const structuredAnswer = reconcileReferences(parseStructuredAnswer(rawAnswer), sources);
+  return {
+    answer: renderStructuredOralAnswer(structuredAnswer),
+    mode: vectorStoreId ? "openai-file-search" : "openai",
+    sources,
+    model,
+  };
+}
+
+export async function analyseWithOpenAI(part: OralPart, query: string): Promise<OpenAIAnswer> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
+
+  const model = process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
+  const vectorStoreId = process.env.OPENAI_VECTOR_STORE_ID?.trim();
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      store: false,
-      instructions: buildOralSystemPrompt(part),
-      input: `Exam part: ${part}\n\nCase or question:\n${query}`,
-      reasoning: { effort: "low" },
-      max_output_tokens: 3000,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "oral_exam_answer",
-          description: "A concise, evidence-grounded Australian intern pharmacist oral-exam answer.",
-          strict: true,
-          schema: oralAnswerJsonSchema,
-        },
-      },
-      ...(tools
-        ? {
-            tools,
-            tool_choice: "auto",
-            include: ["file_search_call.results"],
-          }
-        : {}),
-    }),
+    body: JSON.stringify(buildRequestBody(part, query, false)),
     signal: AbortSignal.timeout(90_000),
   });
 
@@ -204,16 +277,161 @@ export async function analyseWithOpenAI(part: OralPart, query: string): Promise<
     throw new Error(payload.error?.message || `OpenAI request failed with status ${response.status}`);
   }
 
-  const rawAnswer = extractOutputText(payload);
-  if (!rawAnswer) throw new Error("OpenAI returned no answer text");
+  return finalizeAnswer(extractOutputText(payload), extractSources(payload), model, vectorStoreId);
+}
 
-  const sources = extractSources(payload);
-  const structuredAnswer = reconcileReferences(parseStructuredAnswer(rawAnswer), sources);
+export async function analyseWithOpenAIStream(
+  part: OralPart,
+  query: string,
+  options: {
+    signal?: AbortSignal;
+    onProgress?: (progress: AnalysisProgress) => void;
+  } = {},
+): Promise<OpenAIAnswer> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
 
-  return {
-    answer: renderStructuredOralAnswer(structuredAnswer),
-    mode: vectorStoreId ? "openai-file-search" : "openai",
-    sources,
-    model,
+  const model = process.env.OPENAI_MODEL?.trim() || "gpt-5-mini";
+  const vectorStoreId = process.env.OPENAI_VECTOR_STORE_ID?.trim();
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, AbortSignal.timeout(90_000)])
+    : AbortSignal.timeout(90_000);
+
+  options.onProgress?.({
+    type: "status",
+    stage: "connecting",
+    message: "Connecting to the evidence-grounded answer engine…",
+  });
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(buildRequestBody(part, query, true)),
+    signal,
+  });
+
+  if (!response.ok || !response.body) {
+    const errorPayload = (await response.json().catch(() => ({}))) as ResponsesPayload;
+    throw new Error(
+      errorPayload.error?.message || `OpenAI streaming request failed with status ${response.status}`,
+    );
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const streamedSources = new Map<string, RetrievedSource>();
+  let buffer = "";
+  let rawAnswer = "";
+  let finalPayload: ResponsesPayload | undefined;
+  let searchStarted = false;
+  let draftingStarted = false;
+
+  const handleEvent = (eventName: string, data: ResponsesStreamEvent) => {
+    const type = data.type || eventName;
+
+    collectSourcesFromUnknown(data, streamedSources, (source) => {
+      options.onProgress?.({ type: "source", source });
+    });
+
+    if (
+      type === "response.file_search_call.in_progress" ||
+      type === "response.file_search_call.searching" ||
+      (type === "response.output_item.added" && data.item?.type === "file_search_call")
+    ) {
+      if (!searchStarted) {
+        searchStarted = true;
+        options.onProgress?.({
+          type: "status",
+          stage: "searching",
+          message: "Searching the approved Part A, B and C evidence sources…",
+        });
+      }
+    }
+
+    if (type === "response.file_search_call.completed") {
+      options.onProgress?.({
+        type: "status",
+        stage: "searching",
+        message:
+          streamedSources.size > 0
+            ? `${streamedSources.size} relevant source${streamedSources.size === 1 ? "" : "s"} retrieved.`
+            : "Source search completed; checking the retrieved evidence…",
+      });
+    }
+
+    if (type === "response.output_text.delta" && typeof data.delta === "string") {
+      rawAnswer += data.delta;
+      if (!draftingStarted) {
+        draftingStarted = true;
+        options.onProgress?.({
+          type: "status",
+          stage: "drafting",
+          message: "Preparing a concise, exam-ready answer…",
+        });
+      }
+    }
+
+    if (type === "response.completed" && data.response) {
+      finalPayload = data.response;
+      collectSourcesFromUnknown(finalPayload, streamedSources, (source) => {
+        options.onProgress?.({ type: "source", source });
+      });
+    }
+
+    if (type === "response.failed" || type === "error") {
+      throw new Error(data.error?.message || "OpenAI streaming response failed");
+    }
   };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split(/\r?\n\r?\n/);
+    buffer = frames.pop() || "";
+
+    for (const frame of frames) {
+      if (!frame.trim()) continue;
+      let eventName = "";
+      const dataLines: string[] = [];
+      for (const line of frame.split(/\r?\n/)) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+      }
+      const serialized = dataLines.join("\n");
+      if (!serialized || serialized === "[DONE]") continue;
+      handleEvent(eventName, JSON.parse(serialized) as ResponsesStreamEvent);
+    }
+  }
+
+  if (buffer.trim()) {
+    const dataLine = buffer
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n");
+    if (dataLine && dataLine !== "[DONE]") {
+      handleEvent("", JSON.parse(dataLine) as ResponsesStreamEvent);
+    }
+  }
+
+  options.onProgress?.({
+    type: "status",
+    stage: "validating",
+    message: "Validating safety points, structure and citations…",
+  });
+
+  const finalSources = new Map<string, RetrievedSource>(streamedSources);
+  for (const source of finalPayload ? extractSources(finalPayload) : []) mergeSource(finalSources, source);
+  const finalRawAnswer = finalPayload ? extractOutputText(finalPayload) || rawAnswer : rawAnswer;
+
+  return finalizeAnswer(
+    finalRawAnswer,
+    [...finalSources.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)),
+    model,
+    vectorStoreId,
+  );
 }
