@@ -1,13 +1,21 @@
 export type OralPart = "A" | "B" | "C";
+export type CaseView = "case-only" | "case-information";
 
 export type CatalogEntry = {
   part: OralPart;
   caseId: string;
-  item?: number;
   title: string;
   prompt: string;
   order: number;
+  sourceFile: string;
+  caseOnlyPage?: number;
+  informationPage?: number;
+  questionPage?: number;
 };
+
+const PART_A_SOURCE = "OralExam_PartA_Questions-1.pdf";
+const PART_B_SOURCE = "LEGAL Part B.pdf";
+const PART_C_SOURCE = "OralExam_PartC_Questions.pdf";
 
 const partAOrder = `
 F4283 F4297 F4246 F42C7 F424E F4247 F42A8 F42BC F4241 F427F F4261 F42AD
@@ -25,6 +33,19 @@ F424A F42F0 F42B2 F425F F4277 F42E1 F4290 F42ED F42A4 F4248 F42B0 F42DF
 F42A9 F4266 F425C F4292 F4256 F425A F42A0 F4278 F428F F4293 F4249 F428C
 F42BD F42D6 F4251 F42C2 F4280 F426A F42DD F42A7
 `.trim().split(/\s+/);
+
+const partAInformationPages = expandPageCounts([
+  [20, 5], [21, 5], [22, 4], [23, 4], [24, 5], [25, 4], [26, 4], [27, 5],
+  [28, 4], [29, 5], [30, 4], [31, 6], [32, 6], [33, 4], [34, 5], [35, 4],
+  [36, 4], [37, 4], [38, 5], [39, 5], [40, 6], [41, 5], [42, 5], [43, 5],
+  [44, 5], [45, 5], [46, 4], [47, 4], [48, 5], [49, 4], [50, 5], [51, 6],
+  [52, 6], [53, 5], [54, 3],
+]);
+
+const partACaseOnlyPages = expandPageCounts([
+  [6, 11], [7, 12], [8, 12], [9, 12], [10, 12], [11, 12], [12, 12],
+  [13, 12], [14, 11], [15, 12], [16, 12], [17, 12], [18, 11], [19, 12],
+]);
 
 const partATitles: Record<string, string> = {
   F4283: "15 year old female presents with redness in the face.",
@@ -95,13 +116,24 @@ const partCOrder = `
 2DC74C 2DC71A 2DC773 2DC771 2DC717 2DC6DD 2DC714 2DC6F7
 `.trim().split(/\s+/);
 
+const partCInformationPages = `
+36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55
+56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75
+76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95
+96 97 98 100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116
+117 118 119 120 121 123 124 125 126 127 128 129 130 132 133 134 135 136 137 138
+139 140 141 142 143 144 145 146 147 148 149 150 152 153 154 155 156 157 158 159
+160 161 162 163 164 165 166 167 168 169 170 172 173 174 175 176 177 178 179 180
+181 182 183 184 185 186 187 188 189 190 191 193 194 195 196 197 198 199
+`.trim().split(/\s+/).map(Number);
+
 const partCTitles: Record<string, string> = {
   "2DC70A": "Moduretic prescription, dry-mouth request and respiratory medicine history.",
   "2DC71E": "Norspan prescription review.",
   "2DC6C7": "New zolpidem prescription with analgesic and gout history.",
   "2DC74E": "Pantoprazole prescription review.",
   "2DC6D0": "Colchicine and allopurinol prescription review.",
-  "2DC6C8": "Nexium HP7 prescription with penicillin allergy and interaction considerations.",
+  "2DC6C8": "Nexium HP7 prescription with interaction considerations.",
   "2DC730": "Doxycycline prescription review.",
   "2DC743": "Phenoxymethylpenicillin prescription review.",
   "2DC750": "Repeat pravastatin and new glucagon in an older patient with diabetes.",
@@ -138,21 +170,60 @@ const partBPrompts: Record<number, string> = {
   16: "A handwritten diazepam prescription appears to have an overwritten quantity.",
 };
 
-function buildCaseCatalog(part: "A" | "C", order: string[], titles: Record<string, string>) {
-  return order.map((caseId, index): CatalogEntry => {
+function expandPageCounts(groups: ReadonlyArray<readonly [number, number]>) {
+  return groups.flatMap(([page, count]) => Array.from({ length: count }, () => page));
+}
+
+function assertAligned(label: string, order: string[], pages: number[]) {
+  if (order.length !== pages.length) {
+    throw new Error(`${label} metadata is misaligned: ${order.length} cases and ${pages.length} pages.`);
+  }
+}
+
+assertAligned("Part A case-only", partAOrder, partACaseOnlyPages);
+assertAligned("Part A case-information", partAOrder, partAInformationPages);
+assertAligned("Part C case-information", partCOrder, partCInformationPages);
+
+function buildCaseCatalog(
+  part: "A" | "C",
+  order: string[],
+  titles: Record<string, string>,
+  sourceFile: string,
+  informationPages: number[],
+  caseOnlyPages?: number[],
+): CatalogEntry[] {
+  return order.map((caseId, index) => {
     const title = titles[caseId] ?? `${part === "A" ? "OTC" : "Clinical"} case ${caseId}`;
-    return {
+    const entry: CatalogEntry = {
       part,
       caseId,
       title,
-      prompt: `Part ${part}, Case ID: ${caseId}. ${title} Retrieve the exact case wording and evidence from the approved indexed source before answering.`,
+      sourceFile,
+      caseOnlyPage: caseOnlyPages?.[index],
+      informationPage: informationPages[index],
       order: index + 1,
+      prompt: "",
     };
+    return { ...entry, prompt: buildCatalogPrompt(entry, "case-information") };
   });
 }
 
-export const partACases = buildCaseCatalog("A", partAOrder, partATitles);
-export const partCCases = buildCaseCatalog("C", partCOrder, partCTitles);
+export const partACases = buildCaseCatalog(
+  "A",
+  partAOrder,
+  partATitles,
+  PART_A_SOURCE,
+  partAInformationPages,
+  partACaseOnlyPages,
+);
+
+export const partCCases = buildCaseCatalog(
+  "C",
+  partCOrder,
+  partCTitles,
+  PART_C_SOURCE,
+  partCInformationPages,
+);
 
 export const partBQuestions: CatalogEntry[] = Array.from({ length: 171 }, (_, index) => {
   const questionNumber = index + 1;
@@ -161,10 +232,31 @@ export const partBQuestions: CatalogEntry[] = Array.from({ length: 171 }, (_, in
     part: "B",
     caseId: String(questionNumber),
     title,
-    prompt: `Part B, Question ${questionNumber}. ${title} Retrieve the exact scenario wording and current jurisdiction-specific evidence from the approved indexed source before answering.`,
+    sourceFile: PART_B_SOURCE,
+    prompt: `Part B, Question ${questionNumber}. ${title}\nSource: ${PART_B_SOURCE}. Retrieve the exact numbered scenario and current jurisdiction-specific evidence before answering.`,
     order: questionNumber,
   };
 });
+
+export function sourcePageForView(entry: CatalogEntry, view: CaseView) {
+  return view === "case-only" ? entry.caseOnlyPage : entry.informationPage;
+}
+
+export function buildCatalogPrompt(entry: CatalogEntry, view: CaseView = "case-information") {
+  if (entry.part === "B") return entry.prompt;
+
+  const page = sourcePageForView(entry, view);
+  const viewLabel = view === "case-only" ? "Case Only" : "Case and Information";
+  const pageLabel = page ? `, page ${page}` : "";
+  return [
+    `Part ${entry.part}, Case ID: ${entry.caseId}.`,
+    entry.title,
+    `Source: ${entry.sourceFile}${pageLabel}, ${viewLabel}.`,
+    view === "case-only"
+      ? "Use the case stem only. Do not assume hidden information that has not been supplied."
+      : "Retrieve the exact case stem and further information from the approved indexed source before answering.",
+  ].join("\n");
+}
 
 export function getCatalogForPart(part: OralPart): CatalogEntry[] {
   if (part === "A") return partACases;
