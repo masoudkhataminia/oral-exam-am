@@ -10,7 +10,6 @@ export type RetrievedSource = {
   fileId?: string;
   filename: string;
   score?: number;
-  text?: string;
 };
 
 export type OpenAIAnswer = {
@@ -45,9 +44,11 @@ type ResponseOutputItem = {
 };
 
 type ResponsesPayload = {
+  status?: string;
   output_text?: string;
   output?: ResponseOutputItem[];
   error?: { message?: string };
+  incomplete_details?: { reason?: string };
 };
 
 type ResponsesStreamEvent = {
@@ -98,7 +99,6 @@ function extractSources(payload: ResponsesPayload): RetrievedSource[] {
         fileId: result.file_id,
         filename: result.filename,
         score: result.score,
-        text: result.text,
       });
     }
   }
@@ -124,7 +124,6 @@ function collectSourcesFromUnknown(
       fileId: typeof record.file_id === "string" ? record.file_id : undefined,
       filename,
       score: typeof record.score === "number" ? record.score : undefined,
-      text: typeof record.text === "string" ? record.text : undefined,
     };
     if (mergeSource(target, source)) onNewSource?.(source);
   }
@@ -198,6 +197,12 @@ function parseStructuredAnswer(raw: string): StructuredOralAnswer {
   } catch (error) {
     console.error("Invalid structured oral answer", error);
     throw new Error("OpenAI returned an answer that did not match the oral-exam schema");
+  }
+}
+
+function assertCompleteResponse(payload: ResponsesPayload) {
+  if (payload.status === "incomplete") {
+    throw new Error(payload.incomplete_details?.reason || "OpenAI response was incomplete");
   }
 }
 
@@ -276,6 +281,7 @@ export async function analyseWithOpenAI(part: OralPart, query: string): Promise<
   if (!response.ok) {
     throw new Error(payload.error?.message || `OpenAI request failed with status ${response.status}`);
   }
+  assertCompleteResponse(payload);
 
   return finalizeAnswer(extractOutputText(payload), extractSources(payload), model, vectorStoreId);
 }
@@ -328,6 +334,7 @@ export async function analyseWithOpenAIStream(
   let finalPayload: ResponsesPayload | undefined;
   let searchStarted = false;
   let draftingStarted = false;
+  let streamCompleted = false;
 
   const handleEvent = (eventName: string, data: ResponsesStreamEvent) => {
     const type = data.type || eventName;
@@ -374,11 +381,20 @@ export async function analyseWithOpenAIStream(
       }
     }
 
-    if (type === "response.completed" && data.response) {
-      finalPayload = data.response;
-      collectSourcesFromUnknown(finalPayload, streamedSources, (source) => {
-        options.onProgress?.({ type: "source", source });
-      });
+    if (type === "response.completed") {
+      streamCompleted = true;
+      if (data.response) {
+        finalPayload = data.response;
+        collectSourcesFromUnknown(finalPayload, streamedSources, (source) => {
+          options.onProgress?.({ type: "source", source });
+        });
+      }
+    }
+
+    if (type === "response.incomplete") {
+      throw new Error(
+        data.response?.incomplete_details?.reason || "OpenAI response was incomplete",
+      );
     }
 
     if (type === "response.failed" || type === "error") {
@@ -417,6 +433,9 @@ export async function analyseWithOpenAIStream(
       handleEvent("", JSON.parse(dataLine) as ResponsesStreamEvent);
     }
   }
+
+  if (!streamCompleted) throw new Error("OpenAI response was incomplete");
+  if (finalPayload) assertCompleteResponse(finalPayload);
 
   options.onProgress?.({
     type: "status",

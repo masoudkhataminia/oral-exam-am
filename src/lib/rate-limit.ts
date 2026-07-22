@@ -1,3 +1,6 @@
+import { Ratelimit } from "@upstash/ratelimit";
+import { Redis } from "@upstash/redis";
+
 type RateBucket = {
   count: number;
   resetAt: number;
@@ -8,6 +11,7 @@ type RateLimitResult = {
   limit: number;
   remaining: number;
   resetAt: number;
+  unavailable?: boolean;
 };
 
 const globalRateState = globalThis as typeof globalThis & {
@@ -17,6 +21,8 @@ const globalRateState = globalThis as typeof globalThis & {
 const buckets =
   globalRateState.__oralExamRateBuckets ??
   (globalRateState.__oralExamRateBuckets = new Map<string, RateBucket>());
+
+let distributedLimiter: Ratelimit | null | undefined;
 
 function configuredLimit() {
   const parsed = Number.parseInt(process.env.RATE_LIMIT_PER_HOUR ?? "20", 10);
@@ -39,10 +45,7 @@ function removeExpiredBuckets(now: number) {
   }
 }
 
-export function consumeGenerationAllowance(request: Request): RateLimitResult {
-  const now = Date.now();
-  const limit = configuredLimit();
-  const identifier = clientIdentifier(request);
+function inMemoryAllowance(identifier: string, now: number, limit: number): RateLimitResult {
   const existing = buckets.get(identifier);
 
   removeExpiredBuckets(now);
@@ -64,4 +67,50 @@ export function consumeGenerationAllowance(request: Request): RateLimitResult {
     remaining: Math.max(0, limit - existing.count),
     resetAt: existing.resetAt,
   };
+}
+
+function getDistributedLimiter(limit: number) {
+  if (distributedLimiter !== undefined) return distributedLimiter;
+
+  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  if (!url || !token) {
+    distributedLimiter = null;
+    return distributedLimiter;
+  }
+
+  distributedLimiter = new Ratelimit({
+    redis: new Redis({ url, token }),
+    limiter: Ratelimit.slidingWindow(limit, "1 h"),
+    analytics: true,
+    prefix: "oral-exam-generation",
+  });
+  return distributedLimiter;
+}
+
+export async function consumeGenerationAllowance(request: Request): Promise<RateLimitResult> {
+  const now = Date.now();
+  const limit = configuredLimit();
+  const identifier = clientIdentifier(request);
+  const limiter = getDistributedLimiter(limit);
+
+  if (!limiter) {
+    if (process.env.NODE_ENV === "production") {
+      return { allowed: false, limit, remaining: 0, resetAt: now + 60_000, unavailable: true };
+    }
+    return inMemoryAllowance(identifier, now, limit);
+  }
+
+  try {
+    const result = await limiter.limit(identifier);
+    return {
+      allowed: result.success,
+      limit: result.limit,
+      remaining: result.remaining,
+      resetAt: result.reset,
+    };
+  } catch (error) {
+    console.error("Distributed rate limit unavailable", error);
+    return { allowed: false, limit, remaining: 0, resetAt: now + 60_000, unavailable: true };
+  }
 }

@@ -18,12 +18,12 @@ export type StreamAnalyseResult = {
 };
 
 export type AnalysisStreamEvent =
-  | { type: "status"; stage: string; message: string }
-  | { type: "source"; source: { filename: string; score?: number } }
-  | { type: "answer_delta"; delta: string }
-  | { type: "complete"; result: StreamAnalyseResult }
-  | { type: "error"; message: string }
-  | { type: "cancelled" };
+  | { type: "status"; stage: string; message: string; requestId?: string }
+  | { type: "source"; source: { filename: string; score?: number }; requestId?: string }
+  | { type: "answer_delta"; delta: string; requestId?: string }
+  | { type: "complete"; result: StreamAnalyseResult; requestId?: string }
+  | { type: "error"; message: string; requestId?: string }
+  | { type: "cancelled"; requestId?: string };
 
 export type AnalysisStreamInput = {
   part: OralPart;
@@ -31,7 +31,22 @@ export type AnalysisStreamInput = {
   itemNumber?: string;
   query: string;
   forceRefresh: boolean;
+  requestId: string;
 };
+
+export function isCurrentAnalysisEvent(
+  active: { controller: AbortController; requestId: string } | null,
+  controller: AbortController,
+  requestId: string,
+  eventRequestId?: string,
+) {
+  return (
+    !controller.signal.aborted &&
+    active?.controller === controller &&
+    active.requestId === requestId &&
+    (!eventRequestId || eventRequestId === requestId)
+  );
+}
 
 export async function streamAnalysis(
   input: AnalysisStreamInput,

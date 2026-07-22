@@ -7,6 +7,7 @@ import {
 import { consumeGenerationAllowance } from "@/lib/rate-limit";
 import {
   findSavedAnswer,
+  sanitizeStoredSources,
   saveFreshAnswer,
   type AnswerIdentity,
   type PublicAnswer,
@@ -21,6 +22,7 @@ const Input = z.object({
   itemNumber: z.string().trim().max(80).optional(),
   query: z.string().trim().min(2).max(12000),
   forceRefresh: z.boolean().optional().default(false),
+  requestId: z.string().trim().min(1).max(100).optional(),
 });
 
 type StreamEvent =
@@ -46,6 +48,24 @@ function unsavedPreview(identity: AnswerIdentity, mode: string, warning: string)
     mode,
     sources: [],
     warning,
+  };
+}
+
+function unsavedGenerated(
+  identity: AnswerIdentity,
+  generated: Awaited<ReturnType<typeof analyseWithOpenAIStream>>,
+): PublicAnswer {
+  const now = new Date().toISOString();
+  return {
+    key: "unsaved-custom",
+    ...identity,
+    answer: generated.answer,
+    cached: false,
+    createdAt: now,
+    updatedAt: now,
+    version: 0,
+    mode: generated.mode,
+    sources: sanitizeStoredSources(generated.sources),
   };
 }
 
@@ -87,12 +107,13 @@ export async function POST(request: Request) {
 
   const encoder = new TextEncoder();
   let closed = false;
+  const requestId = parsed.requestId;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (event: StreamEvent) => {
         if (closed || request.signal.aborted) return;
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ ...event, requestId })}\n\n`));
       };
 
       const finish = () => {
@@ -125,11 +146,13 @@ export async function POST(request: Request) {
           return;
         }
 
-        const allowance = consumeGenerationAllowance(request);
+        const allowance = await consumeGenerationAllowance(request);
         if (!allowance.allowed) {
           send({
             type: "error",
-            message: "Fresh-answer limit reached. Saved answers remain available; try Refresh again later.",
+            message: allowance.unavailable
+              ? "Fresh-answer generation is temporarily unavailable because the production rate limiter is not ready."
+              : "Fresh-answer limit reached. Saved answers remain available; try Refresh again later.",
           });
           finish();
           return;
@@ -156,8 +179,11 @@ export async function POST(request: Request) {
           },
         });
 
+        request.signal.throwIfAborted();
         send({ type: "status", stage: "saving", message: "Saving the validated answer and source record…" });
-        const saved = await saveFreshAnswer(identity, generated);
+        const saved =
+          (await saveFreshAnswer(identity, generated, { signal: request.signal })) ??
+          unsavedGenerated(identity, generated);
 
         send({ type: "status", stage: "presenting", message: "Answer ready." });
         for (const delta of splitAnswerForStreaming(saved.answer)) {

@@ -39,9 +39,15 @@ OPENAI_VECTOR_STORE_ID=vs_your_vector_store_id
 AMH_REFERENCE_MODE=file-search
 ANSWER_STORE_PATH=/data/oral-exam-answers.json
 RATE_LIMIT_PER_HOUR=20
+UPSTASH_REDIS_REST_URL=your_upstash_rest_url
+UPSTASH_REDIS_REST_TOKEN=your_upstash_rest_token
+CASE_SOURCE_VERSION=2026-07-23
+ANSWER_PROMPT_VERSION=oral-v1
 ```
 
 Keep `OPENAI_API_KEY` server-side. Never place it in a variable prefixed with `NEXT_PUBLIC_`.
+
+Production fresh-answer generation fails closed unless both Upstash variables are configured. Custom pasted cases are generated as unsaved previews and never enter the shared cache or global history.
 
 `OPENAI_VECTOR_STORE_ID` should point to the approved Part A, Part B and Part C reference documents. Without an indexed source, the app must not claim that it searched those documents.
 
@@ -64,8 +70,10 @@ Do not store or submit patient-identifying information. Do not scrape or reprodu
 ## Run locally
 
 ```bash
-pnpm install
-pnpm typecheck
-pnpm build
-pnpm dev
+npm install
+npm run typecheck
+npm run test
+npm run build
+npm run test:e2e
+npm run dev
 ```
