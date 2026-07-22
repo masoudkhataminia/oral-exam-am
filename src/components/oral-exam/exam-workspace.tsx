@@ -18,7 +18,14 @@ import {
   streamAnalysis,
   type AnalysisStreamEvent,
 } from "@/lib/analysis-stream-client";
-import { getCatalogForPart, type CatalogEntry, type OralPart } from "@/lib/case-catalog";
+import {
+  buildCatalogPrompt,
+  getCatalogForPart,
+  sourcePageForView,
+  type CaseView,
+  type CatalogEntry,
+  type OralPart,
+} from "@/lib/case-catalog";
 import { cn } from "@/lib/utils";
 
 const partMeta: Record<
@@ -28,7 +35,7 @@ const partMeta: Record<
   A: {
     label: "Part A",
     title: "OTC & Self-care",
-    subtitle: "Symptoms, referral and counselling",
+    subtitle: "Primary healthcare consultation and counselling",
     icon: ClipboardCheckIcon,
   },
   B: {
@@ -40,16 +47,20 @@ const partMeta: Record<
   C: {
     label: "Part C",
     title: "Clinical & Prescription Review",
-    subtitle: "Screening, intervention and monitoring",
+    subtitle: "Clinical problem solving and communication",
     icon: StethoscopeIcon,
   },
 };
+
+function savedCaseView(value?: string): CaseView {
+  return value === "case-only" ? "case-only" : "case-information";
+}
 
 export function ExamWorkspace() {
   const activeRequest = useRef<AbortController | null>(null);
   const [part, setPart] = useState<OralPart>("A");
   const [caseNumber, setCaseNumber] = useState("");
-  const [itemNumber, setItemNumber] = useState("");
+  const [caseView, setCaseView] = useState<CaseView>("case-information");
   const [query, setQuery] = useState("");
   const [catalogSearch, setCatalogSearch] = useState("");
   const [result, setResult] = useState<AnalyseResult | null>(null);
@@ -62,6 +73,10 @@ export function ExamWorkspace() {
   const [error, setError] = useState("");
 
   const catalog = useMemo(() => getCatalogForPart(part), [part]);
+  const selectedEntry = useMemo(
+    () => catalog.find((entry) => entry.caseId.toLowerCase() === caseNumber.trim().toLowerCase()),
+    [catalog, caseNumber],
+  );
   const filteredCatalog = useMemo(() => {
     const needle = catalogSearch.trim().toLowerCase();
     if (!needle) return catalog;
@@ -99,11 +114,15 @@ export function ExamWorkspace() {
     setLiveSources([]);
   }
 
+  function setEntryQuestion(entry: CatalogEntry, view: CaseView) {
+    setQuery(entry.part === "B" ? entry.prompt : buildCatalogPrompt(entry, view));
+  }
+
   function changePart(nextPart: OralPart) {
     clearLiveState();
     setPart(nextPart);
     setCaseNumber("");
-    setItemNumber("");
+    setCaseView("case-information");
     setQuery("");
     setCatalogSearch("");
     setResult(null);
@@ -113,9 +132,8 @@ export function ExamWorkspace() {
   function selectEntry(entry: CatalogEntry) {
     clearLiveState();
     setCaseNumber(entry.caseId);
-    setItemNumber("");
     setCatalogSearch(entry.caseId);
-    setQuery(entry.prompt);
+    setEntryQuestion(entry, caseView);
     setResult(null);
     setError("");
   }
@@ -129,15 +147,22 @@ export function ExamWorkspace() {
     const exact = catalog.find(
       (entry) => entry.caseId.toLowerCase() === value.trim().toLowerCase(),
     );
-    if (exact) setQuery(exact.prompt);
+    if (exact) setEntryQuestion(exact, caseView);
+  }
+
+  function changeCaseView(nextView: CaseView) {
+    clearLiveState();
+    setCaseView(nextView);
+    setResult(null);
+    setError("");
+    if (selectedEntry) setEntryQuestion(selectedEntry, nextView);
   }
 
   function submittedQuery() {
     if (query.trim()) return query.trim();
     if (part === "B" && caseNumber) return `Part B question ${caseNumber}`;
-    if (caseNumber) {
-      return `Part ${part}, Case ID ${caseNumber}${itemNumber ? `, Case item ${itemNumber}` : ""}`;
-    }
+    if (selectedEntry) return buildCatalogPrompt(selectedEntry, caseView);
+    if (caseNumber) return `Part ${part}, Case ID ${caseNumber}`;
     return "";
   }
 
@@ -169,7 +194,7 @@ export function ExamWorkspace() {
         {
           part,
           caseNumber: caseNumber.trim() || undefined,
-          itemNumber: itemNumber.trim() || undefined,
+          itemNumber: part === "B" ? undefined : caseView,
           query: finalQuery,
           forceRefresh,
         },
@@ -180,7 +205,6 @@ export function ExamWorkspace() {
               setStreamStatus(event.message);
               return;
             }
-
             if (event.type === "source") {
               setLiveSources((current) =>
                 current.includes(event.source.filename)
@@ -189,12 +213,10 @@ export function ExamWorkspace() {
               );
               return;
             }
-
             if (event.type === "answer_delta") {
               setStreamedAnswer((current) => current + event.delta);
               return;
             }
-
             if (event.type === "complete") {
               setResult(event.result as AnalyseResult);
               setStreamedAnswer("");
@@ -202,12 +224,10 @@ export function ExamWorkspace() {
               if (event.result.version > 0) await loadHistory();
               return;
             }
-
             if (event.type === "cancelled") {
               setStreamStatus("Analysis stopped.");
               return;
             }
-
             if (event.type === "error") throw new Error(event.message);
           },
         },
@@ -227,17 +247,21 @@ export function ExamWorkspace() {
 
   function openSaved(item: AnalyseResult) {
     clearLiveState();
+    const nextView = savedCaseView(item.itemNumber);
     setPart(item.part);
     setCaseNumber(item.caseNumber ?? "");
-    setItemNumber(item.itemNumber ?? "");
+    setCaseView(nextView);
     setCatalogSearch(item.caseNumber ?? "");
     setQuery(item.query);
     setResult(item);
     setError("");
   }
 
-  const caseLabel = part === "B" ? "Question number" : "Case number / Case ID";
+  const caseLabel = part === "B" ? "Question number" : "Case ID";
   const casePlaceholder = part === "B" ? "Type or select 11" : "Type or select a Case ID";
+  const selectedPage = selectedEntry && part !== "B"
+    ? sourcePageForView(selectedEntry, caseView)
+    : selectedEntry?.questionPage;
 
   return (
     <div className="min-h-dvh bg-slate-100 text-slate-950 dark:bg-slate-950 dark:text-white">
@@ -263,9 +287,7 @@ export function ExamWorkspace() {
       <div className="mx-auto grid max-w-[1500px] gap-5 p-4 sm:p-6 xl:grid-cols-[260px_minmax(0,1fr)_minmax(390px,0.82fr)]">
         <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
           <section className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-            <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-              Exam section
-            </p>
+            <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Exam section</p>
             <div className="space-y-1">
               {(Object.keys(partMeta) as OralPart[]).map((id) => {
                 const meta = partMeta[id];
@@ -282,13 +304,8 @@ export function ExamWorkspace() {
                         : "text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900",
                     )}
                   >
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-current/15 bg-white/70 dark:bg-slate-950/40">
-                      <Icon className="size-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold">{meta.label}</span>
-                      <span className="mt-0.5 block truncate text-[11px] opacity-65">{meta.title}</span>
-                    </span>
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-current/15 bg-white/70 dark:bg-slate-950/40"><Icon className="size-4" /></span>
+                    <span className="min-w-0"><span className="block text-sm font-semibold">{meta.label}</span><span className="mt-0.5 block truncate text-[11px] opacity-65">{meta.title}</span></span>
                   </button>
                 );
               })}
@@ -296,39 +313,17 @@ export function ExamWorkspace() {
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-            <div className="mb-2 flex items-center justify-between px-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Saved answers</p>
-              <HistoryIcon className="size-3.5 text-slate-400" />
-            </div>
+            <div className="mb-2 flex items-center justify-between px-2"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Saved answers</p><HistoryIcon className="size-3.5 text-slate-400" /></div>
             <div className="max-h-[430px] space-y-1 overflow-y-auto">
               {historyLoading ? (
-                <div className="flex items-center gap-2 px-3 py-4 text-xs text-slate-400">
-                  <Loader2Icon className="size-3.5 animate-spin" /> Loading…
-                </div>
+                <div className="flex items-center gap-2 px-3 py-4 text-xs text-slate-400"><Loader2Icon className="size-3.5 animate-spin" /> Loading…</div>
               ) : history.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-slate-200 px-3 py-5 text-center text-xs leading-5 text-slate-400 dark:border-slate-800">
-                  Generated answers will appear here.
-                </p>
+                <p className="rounded-2xl border border-dashed border-slate-200 px-3 py-5 text-center text-xs leading-5 text-slate-400 dark:border-slate-800">Generated answers will appear here.</p>
               ) : (
                 history.map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => openSaved(item)}
-                    className="w-full rounded-xl px-3 py-2.5 text-left hover:bg-slate-100 dark:hover:bg-slate-900"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                        {item.part}{item.caseNumber ?? ""}
-                      </span>
-                      <span className="truncate text-xs font-semibold">
-                        {item.caseNumber
-                          ? item.part === "B"
-                            ? `Question ${item.caseNumber}`
-                            : `Case ${item.caseNumber}`
-                          : "Custom case"}
-                      </span>
-                    </div>
+                  <button key={item.key} type="button" onClick={() => openSaved(item)} className="w-full rounded-xl px-3 py-2.5 text-left hover:bg-slate-100 dark:hover:bg-slate-900">
+                    <div className="flex items-center gap-2"><span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{item.part}{item.caseNumber ?? ""}</span><span className="truncate text-xs font-semibold">{item.caseNumber ? (item.part === "B" ? `Question ${item.caseNumber}` : `Case ${item.caseNumber}`) : "Custom case"}</span></div>
+                    {item.part !== "B" && item.itemNumber && <p className="mt-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">{item.itemNumber === "case-only" ? "Case only" : "Case + information"}</p>}
                     <p className="mt-1 max-h-8 overflow-hidden text-[11px] leading-4 text-slate-400">{item.query}</p>
                   </button>
                 ))
@@ -336,101 +331,49 @@ export function ExamWorkspace() {
             </div>
           </section>
 
-          <p className="rounded-2xl bg-amber-50 px-3 py-2.5 text-[11px] leading-5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            This app is public. Do not enter patient-identifying information.
-          </p>
+          <p className="rounded-2xl bg-amber-50 px-3 py-2.5 text-[11px] leading-5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">This app is public. Do not enter patient-identifying information.</p>
         </aside>
 
         <main className="space-y-5">
           <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-            <div className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/70">
-              <h1 className="text-base font-semibold">{partMeta[part].title}</h1>
-              <p className="mt-1 text-xs text-slate-400">{partMeta[part].subtitle}</p>
-            </div>
+            <div className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/70"><h1 className="text-base font-semibold">{partMeta[part].title}</h1><p className="mt-1 text-xs text-slate-400">{partMeta[part].subtitle}</p></div>
             <div className="space-y-4 p-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="space-y-2">
                   <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{caseLabel}</span>
-                  <div className="relative">
-                    <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      list={`case-options-${part}`}
-                      value={caseNumber}
-                      onChange={(event) => handleCaseInput(event.target.value)}
-                      placeholder={casePlaceholder}
-                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-4 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950 dark:focus:ring-emerald-950"
-                    />
-                    <datalist id={`case-options-${part}`}>
-                      {catalog.map((entry) => (
-                        <option key={entry.caseId} value={entry.caseId}>{entry.title}</option>
-                      ))}
-                    </datalist>
-                  </div>
+                  <div className="relative"><SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><input list={`case-options-${part}`} value={caseNumber} onChange={(event) => handleCaseInput(event.target.value)} placeholder={casePlaceholder} className="h-12 w-full rounded-2xl border border-slate-200 bg-white pl-10 pr-4 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950 dark:focus:ring-emerald-950" /><datalist id={`case-options-${part}`}>{catalog.map((entry) => <option key={entry.caseId} value={entry.caseId}>{entry.title}</option>)}</datalist></div>
                 </label>
 
                 {part !== "B" ? (
                   <label className="space-y-2">
-                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Case item</span>
-                    <input
-                      list={`item-options-${part}`}
-                      inputMode="numeric"
-                      value={itemNumber}
-                      onChange={(event) => {
-                        clearLiveState();
-                        setItemNumber(event.target.value);
-                        setResult(null);
-                      }}
-                      placeholder="Type or select item"
-                      className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950 dark:focus:ring-emerald-950"
-                    />
-                    <datalist id={`item-options-${part}`}>
-                      {Array.from({ length: 10 }, (_, index) => (
-                        <option key={index + 1} value={String(index + 1)} />
-                      ))}
-                    </datalist>
+                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Case view</span>
+                    <select value={caseView} onChange={(event) => changeCaseView(event.target.value as CaseView)} className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950 dark:focus:ring-emerald-950">
+                      <option value="case-information">Case + information{selectedEntry?.informationPage ? ` · page ${selectedEntry.informationPage}` : ""}</option>
+                      <option value="case-only">Case only{selectedEntry?.caseOnlyPage ? ` · page ${selectedEntry.caseOnlyPage}` : " · source section"}</option>
+                    </select>
                   </label>
                 ) : (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/50">
-                    <p className="text-xs font-semibold">PDF order</p>
-                    <p className="mt-1 text-xs leading-5 text-slate-400">Questions remain in source order from 1 to 171.</p>
-                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/50"><p className="text-xs font-semibold">Numbered scenarios</p><p className="mt-1 text-xs leading-5 text-slate-400">Part B remains in the source order from question 1 to 171.</p></div>
                 )}
               </div>
 
+              {selectedEntry && (
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+                  <FileSearchIcon className="size-4" />
+                  <span className="font-semibold">{selectedEntry.sourceFile}</span>
+                  {selectedPage && <span>· page {selectedPage}</span>}
+                  {part !== "B" && <span>· {caseView === "case-only" ? "Case Only" : "Case and Information"}</span>}
+                </div>
+              )}
+
               <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
-                <div className="mb-2 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold">Ordered source list</p>
-                    <p className="text-[11px] text-slate-400">Search by number, Case ID or wording.</p>
-                  </div>
-                  <span className="text-[11px] text-slate-400">{filteredCatalog.length} items</span>
-                </div>
-                <div className="relative mb-2">
-                  <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-400" />
-                  <input
-                    value={catalogSearch}
-                    onChange={(event) => setCatalogSearch(event.target.value)}
-                    placeholder={part === "B" ? "Search 11 or scenario wording" : "Search Case ID or scenario"}
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-950"
-                  />
-                </div>
+                <div className="mb-2 flex items-center justify-between"><div><p className="text-xs font-semibold">Ordered source list</p><p className="text-[11px] text-slate-400">Search by number, Case ID or wording.</p></div><span className="text-[11px] text-slate-400">{filteredCatalog.length} items</span></div>
+                <div className="relative mb-2"><SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-slate-400" /><input value={catalogSearch} onChange={(event) => setCatalogSearch(event.target.value)} placeholder={part === "B" ? "Search 11 or scenario wording" : "Search Case ID or scenario"} className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-xs outline-none focus:border-emerald-400 dark:border-slate-700 dark:bg-slate-950" /></div>
                 <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
                   {filteredCatalog.map((entry) => (
-                    <button
-                      key={`${entry.part}-${entry.caseId}`}
-                      type="button"
-                      onClick={() => selectEntry(entry)}
-                      className={cn(
-                        "flex w-full gap-3 rounded-xl px-3 py-2.5 text-left transition",
-                        caseNumber.toLowerCase() === entry.caseId.toLowerCase()
-                          ? "bg-emerald-100/80 dark:bg-emerald-950/60"
-                          : "hover:bg-white dark:hover:bg-slate-900",
-                      )}
-                    >
-                      <span className="mt-0.5 min-w-11 rounded-md bg-white px-1.5 py-0.5 text-center text-[10px] font-bold text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">
-                        {entry.caseId}
-                      </span>
-                      <span className="max-h-10 overflow-hidden text-xs leading-5 text-slate-600 dark:text-slate-300">{entry.title}</span>
+                    <button key={`${entry.part}-${entry.caseId}`} type="button" onClick={() => selectEntry(entry)} className={cn("flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition", caseNumber.toLowerCase() === entry.caseId.toLowerCase() ? "bg-emerald-100/80 dark:bg-emerald-950/60" : "hover:bg-white dark:hover:bg-slate-900")}>
+                      <span className="mt-0.5 min-w-11 rounded-md bg-white px-1.5 py-0.5 text-center text-[10px] font-bold text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">{entry.caseId}</span>
+                      <span className="min-w-0 flex-1"><span className="block max-h-10 overflow-hidden text-xs leading-5 text-slate-600 dark:text-slate-300">{entry.title}</span><span className="mt-1 block text-[10px] text-slate-400">{entry.sourceFile}{entry.informationPage ? ` · information p.${entry.informationPage}` : ""}</span></span>
                     </button>
                   ))}
                 </div>
@@ -439,60 +382,14 @@ export function ExamWorkspace() {
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-            <div className="mb-3">
-              <h2 className="text-sm font-semibold">Question or case text</h2>
-              <p className="mt-1 text-xs text-slate-400">
-                Review or edit the source reference. Exact licensed wording is retrieved from the approved private source.
-              </p>
-            </div>
-            <textarea
-              value={query}
-              onChange={(event) => {
-                clearLiveState();
-                setQuery(event.target.value);
-                setResult(null);
-              }}
-              rows={11}
-              placeholder="Select a source question above or paste a new case here…"
-              className="min-h-60 w-full resize-y rounded-2xl border border-slate-200 bg-slate-50/50 p-4 text-sm leading-6 outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950/60 dark:focus:bg-slate-950 dark:focus:ring-emerald-950"
-            />
+            <div className="mb-3"><h2 className="text-sm font-semibold">Question or case text</h2><p className="mt-1 text-xs text-slate-400">The public catalog stores only source metadata. Exact scenario wording is retrieved from the approved private source.</p></div>
+            <textarea value={query} onChange={(event) => { clearLiveState(); setQuery(event.target.value); setResult(null); }} rows={11} placeholder="Select a source question above or paste a new case here…" className="min-h-60 w-full resize-y rounded-2xl border border-slate-200 bg-slate-50/50 p-4 text-sm leading-6 outline-none placeholder:text-slate-400 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950/60 dark:focus:bg-slate-950 dark:focus:ring-emerald-950" />
             {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-300">{error}</p>}
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-xs text-slate-400">
-                <FileSearchIcon className="size-4" /> Saved answer is reused unless Refresh is pressed.
-              </div>
-              {loading ? (
-                <button
-                  type="button"
-                  onClick={cancelAnalysis}
-                  className="inline-flex min-w-40 items-center justify-center gap-2 rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-rose-700"
-                >
-                  <SquareIcon className="size-3.5 fill-current" /> Stop analysis
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => void analyse(false)}
-                  className="inline-flex min-w-40 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
-                >
-                  <SparklesIcon className="size-4" /> Generate answer
-                </button>
-              )}
-            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 text-xs text-slate-400"><FileSearchIcon className="size-4" /> Saved answer is reused unless Refresh is pressed.</div>{loading ? <button type="button" onClick={cancelAnalysis} className="inline-flex min-w-40 items-center justify-center gap-2 rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-rose-700"><SquareIcon className="size-3.5 fill-current" /> Stop analysis</button> : <button type="button" onClick={() => void analyse(false)} className="inline-flex min-w-40 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"><SparklesIcon className="size-4" /> Generate answer</button>}</div>
           </section>
         </main>
 
-        <div className="xl:sticky xl:top-6 xl:self-start">
-          <AnswerCard
-            result={result}
-            loading={loading}
-            streamedAnswer={streamedAnswer}
-            streamStatus={streamStatus}
-            liveSources={liveSources}
-            onCancel={cancelAnalysis}
-            onRefresh={() => void analyse(true)}
-          />
-        </div>
+        <div className="xl:sticky xl:top-6 xl:self-start"><AnswerCard result={result} loading={loading} streamedAnswer={streamedAnswer} streamStatus={streamStatus} liveSources={liveSources} onCancel={cancelAnalysis} onRefresh={() => void analyse(true)} /></div>
       </div>
     </div>
   );
