@@ -2,15 +2,23 @@
 
 ## assistant-ui
 
-The chat interface in this project is based on the open-source assistant-ui components and starter patterns from:
+The earlier chat-interface components and starter patterns in this repository are based on:
 
 - Repository: `assistant-ui/assistant-ui`
 - Copyright (c) 2025 AgentbaseAI Inc.
 - Licence: MIT
 
-MIT License
+## OpenAI Responses starter patterns
 
-Copyright (c) 2025 AgentbaseAI Inc.
+The Responses API event-streaming, File Search status and citation-annotation architecture used as a reference for this project is adapted from:
+
+- Repository: `openai/openai-responses-starter-app`
+- Copyright 2025 OpenAI
+- Licence: MIT
+
+Only the relevant architectural patterns are adapted. The general-purpose chat application, unrelated tools and integrations are not included in this oral-exam project.
+
+## MIT License
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
