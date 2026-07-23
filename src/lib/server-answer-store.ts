@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { OralPart } from "@/lib/case-catalog";
+import {
+  buildCatalogPrompt,
+  getCatalogForPart,
+  type CaseView,
+  type OralPart,
+} from "@/lib/case-catalog";
 
 export type StoredSource = { filename: string; score?: number };
 
@@ -55,6 +60,9 @@ const storePath =
 
 let writeQueue: Promise<void> = Promise.resolve();
 
+const canonicalSourceVersion = process.env.CASE_SOURCE_VERSION?.trim() || "2026-07-23";
+const answerPromptVersion = process.env.ANSWER_PROMPT_VERSION?.trim() || "oral-v1";
+
 function cleanIdentifier(value?: string) {
   const cleaned = value?.trim().toLowerCase();
   return cleaned || undefined;
@@ -69,24 +77,46 @@ function normalizeQuery(value: string) {
     .trim();
 }
 
+export function isCanonicalAnswerIdentity(identity: AnswerIdentity) {
+  const caseNumber = cleanIdentifier(identity.caseNumber);
+  if (!caseNumber) return false;
+
+  const entry = getCatalogForPart(identity.part).find(
+    (candidate) => cleanIdentifier(candidate.caseId) === caseNumber,
+  );
+  if (!entry) return false;
+
+  if (identity.part === "B") {
+    return !cleanIdentifier(identity.itemNumber) && identity.query.trim() === entry.prompt.trim();
+  }
+
+  if (identity.itemNumber !== "case-only" && identity.itemNumber !== "case-information") {
+    return false;
+  }
+
+  return identity.query.trim() === buildCatalogPrompt(entry, identity.itemNumber as CaseView).trim();
+}
+
 function makeKey(identity: AnswerIdentity) {
   const raw = [
     identity.part,
-    cleanIdentifier(identity.caseNumber) ?? "custom",
+    cleanIdentifier(identity.caseNumber),
     cleanIdentifier(identity.itemNumber) ?? "all",
-    normalizeQuery(identity.query),
+    canonicalSourceVersion,
+    answerPromptVersion,
   ].join("|");
   return createHash("sha256").update(raw).digest("hex").slice(0, 24);
 }
 
-function tokenSimilarity(left: string, right: string) {
-  if (left === right) return 1;
-  const a = new Set(left.split(" ").filter(Boolean));
-  const b = new Set(right.split(" ").filter(Boolean));
-  if (!a.size || !b.size) return 0;
-  let intersection = 0;
-  for (const token of a) if (b.has(token)) intersection += 1;
-  return intersection / new Set([...a, ...b]).size;
+export function sanitizeStoredSources(sources: readonly StoredSource[] = []): StoredSource[] {
+  return sources
+    .filter((source) => typeof source?.filename === "string" && source.filename.trim())
+    .map((source) => ({
+      filename: source.filename.trim(),
+      ...(typeof source.score === "number" && Number.isFinite(source.score)
+        ? { score: source.score }
+        : {}),
+    }));
 }
 
 async function readStore(): Promise<StoreFile> {
@@ -101,11 +131,17 @@ async function readStore(): Promise<StoreFile> {
   }
 }
 
-async function writeStore(store: StoreFile) {
+async function writeStore(store: StoreFile, signal?: AbortSignal) {
   await mkdir(path.dirname(storePath), { recursive: true });
   const temporaryPath = `${storePath}.${process.pid}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(store, null, 2), "utf8");
-  await rename(temporaryPath, storePath);
+  try {
+    await writeFile(temporaryPath, JSON.stringify(store, null, 2), "utf8");
+    signal?.throwIfAborted();
+    await rename(temporaryPath, storePath);
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 function latest(record: StoredRecord, cached: boolean): PublicAnswer {
@@ -123,37 +159,26 @@ function latest(record: StoredRecord, cached: boolean): PublicAnswer {
     updatedAt: record.updatedAt,
     version: version.version,
     mode: version.mode,
-    sources: version.sources,
+    sources: sanitizeStoredSources(version.sources),
   };
 }
 
-function sameStructuredLocation(record: StoredRecord, identity: AnswerIdentity) {
-  return (
-    record.part === identity.part &&
-    cleanIdentifier(record.caseNumber) === cleanIdentifier(identity.caseNumber) &&
-    cleanIdentifier(record.itemNumber) === cleanIdentifier(identity.itemNumber)
-  );
-}
-
 export async function findSavedAnswer(identity: AnswerIdentity) {
+  if (!isCanonicalAnswerIdentity(identity)) return null;
   const store = await readStore();
   const exact = store.records.find((record) => record.key === makeKey(identity));
-  if (exact) return latest(exact, true);
-
-  const normalized = normalizeQuery(identity.query);
-  const nearMatch = store.records
-    .filter((record) => sameStructuredLocation(record, identity))
-    .map((record) => ({ record, score: tokenSimilarity(record.normalizedQuery, normalized) }))
-    .filter((candidate) => candidate.score >= 0.94)
-    .sort((a, b) => b.score - a.score)[0]?.record;
-  return nearMatch ? latest(nearMatch, true) : null;
+  return exact ? latest(exact, true) : null;
 }
 
 export async function saveFreshAnswer(
   identity: AnswerIdentity,
   generated: { answer: string; mode?: string; sources?: StoredSource[] },
-): Promise<PublicAnswer> {
+  options: { signal?: AbortSignal } = {},
+): Promise<PublicAnswer | null> {
+  if (!isCanonicalAnswerIdentity(identity)) return null;
+
   const operation = writeQueue.catch(() => undefined).then(async (): Promise<PublicAnswer> => {
+    options.signal?.throwIfAborted();
     const store = await readStore();
     const key = makeKey(identity);
     const now = new Date().toISOString();
@@ -181,10 +206,11 @@ export async function saveFreshAnswer(
       version: (record.versions.at(-1)?.version ?? 0) + 1,
       answer: generated.answer,
       mode: generated.mode,
-      sources: generated.sources ?? [],
+      sources: sanitizeStoredSources(generated.sources),
       createdAt: now,
     });
-    await writeStore(store);
+    options.signal?.throwIfAborted();
+    await writeStore(store, options.signal);
     return latest(record, false);
   });
 
@@ -198,7 +224,16 @@ export async function saveFreshAnswer(
 export async function listSavedAnswers(limit = 50) {
   const store = await readStore();
   return store.records
-    .filter((record) => record.versions.length > 0)
+    .filter(
+      (record) =>
+        record.versions.length > 0 &&
+        isCanonicalAnswerIdentity({
+          part: record.part,
+          caseNumber: record.caseNumber,
+          itemNumber: record.itemNumber,
+          query: record.query,
+        }),
+    )
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, Math.max(1, Math.min(limit, 200)))
     .map((record) => latest(record, true));

@@ -239,7 +239,9 @@ export const partBQuestions: CatalogEntry[] = Array.from({ length: 171 }, (_, in
 });
 
 export function sourcePageForView(entry: CatalogEntry, view: CaseView) {
-  return view === "case-only" ? entry.caseOnlyPage : entry.informationPage;
+  return view === "case-only"
+    ? entry.caseOnlyPage ?? entry.informationPage
+    : entry.informationPage;
 }
 
 export function buildCatalogPrompt(entry: CatalogEntry, view: CaseView = "case-information") {

@@ -15,6 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnswerCard, type AnalyseResult } from "@/components/oral-exam/answer-card";
 import {
+  isCurrentAnalysisEvent,
   streamAnalysis,
   type AnalysisStreamEvent,
 } from "@/lib/analysis-stream-client";
@@ -57,7 +58,7 @@ function savedCaseView(value?: string): CaseView {
 }
 
 export function ExamWorkspace() {
-  const activeRequest = useRef<AbortController | null>(null);
+  const activeRequest = useRef<{ controller: AbortController; requestId: string } | null>(null);
   const [part, setPart] = useState<OralPart>("A");
   const [caseNumber, setCaseNumber] = useState("");
   const [caseView, setCaseView] = useState<CaseView>("case-information");
@@ -89,7 +90,7 @@ export function ExamWorkspace() {
 
   useEffect(() => {
     void loadHistory();
-    return () => activeRequest.current?.abort();
+    return () => activeRequest.current?.controller.abort();
   }, []);
 
   async function loadHistory() {
@@ -106,7 +107,7 @@ export function ExamWorkspace() {
   }
 
   function clearLiveState() {
-    activeRequest.current?.abort();
+    activeRequest.current?.controller.abort();
     activeRequest.current = null;
     setLoading(false);
     setStreamStatus("");
@@ -167,7 +168,7 @@ export function ExamWorkspace() {
   }
 
   function cancelAnalysis() {
-    activeRequest.current?.abort();
+    activeRequest.current?.controller.abort();
     activeRequest.current = null;
     setLoading(false);
     setStreamStatus("Analysis stopped.");
@@ -180,9 +181,10 @@ export function ExamWorkspace() {
       return;
     }
 
-    activeRequest.current?.abort();
+    activeRequest.current?.controller.abort();
     const controller = new AbortController();
-    activeRequest.current = controller;
+    const requestId = crypto.randomUUID();
+    activeRequest.current = { controller, requestId };
     setLoading(true);
     setError("");
     setStreamStatus("Starting analysis…");
@@ -197,10 +199,15 @@ export function ExamWorkspace() {
           itemNumber: part === "B" ? undefined : caseView,
           query: finalQuery,
           forceRefresh,
+          requestId,
         },
         {
           signal: controller.signal,
           async onEvent(event: AnalysisStreamEvent) {
+            const active = activeRequest.current;
+            if (!isCurrentAnalysisEvent(active, controller, requestId, event.requestId)) {
+              return;
+            }
             if (event.type === "status") {
               setStreamStatus(event.message);
               return;
@@ -240,8 +247,10 @@ export function ExamWorkspace() {
         setStreamStatus("");
       }
     } finally {
-      if (activeRequest.current === controller) activeRequest.current = null;
-      setLoading(false);
+      if (activeRequest.current?.controller === controller) {
+        activeRequest.current = null;
+        setLoading(false);
+      }
     }
   }
 
@@ -349,7 +358,7 @@ export function ExamWorkspace() {
                     <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Case view</span>
                     <select value={caseView} onChange={(event) => changeCaseView(event.target.value as CaseView)} className="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950 dark:focus:ring-emerald-950">
                       <option value="case-information">Case + information{selectedEntry?.informationPage ? ` · page ${selectedEntry.informationPage}` : ""}</option>
-                      <option value="case-only">Case only{selectedEntry?.caseOnlyPage ? ` · page ${selectedEntry.caseOnlyPage}` : " · source section"}</option>
+                      <option value="case-only">Case only{selectedEntry ? ` · page ${sourcePageForView(selectedEntry, "case-only")}` : ""}</option>
                     </select>
                   </label>
                 ) : (

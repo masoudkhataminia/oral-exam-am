@@ -6,9 +6,12 @@ import { consumeGenerationAllowance } from "@/lib/rate-limit";
 import {
   findSavedAnswer,
   listSavedAnswers,
+  sanitizeStoredSources,
   saveFreshAnswer,
   type AnswerIdentity,
+  type PublicAnswer,
 } from "@/lib/server-answer-store";
+import type { OpenAIAnswer } from "@/lib/openai-responses";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +37,21 @@ function unsavedPreview(identity: AnswerIdentity, mode: string, warning: string)
     mode,
     sources: [],
     warning,
+  };
+}
+
+function unsavedGenerated(identity: AnswerIdentity, generated: OpenAIAnswer): PublicAnswer {
+  const now = new Date().toISOString();
+  return {
+    key: "unsaved-custom",
+    ...identity,
+    answer: generated.answer,
+    cached: false,
+    createdAt: now,
+    updatedAt: now,
+    version: 0,
+    mode: generated.mode,
+    sources: sanitizeStoredSources(generated.sources),
   };
 }
 
@@ -72,7 +90,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const allowance = consumeGenerationAllowance(request);
+    const allowance = await consumeGenerationAllowance(request);
     const rateHeaders = {
       "X-RateLimit-Limit": String(allowance.limit),
       "X-RateLimit-Remaining": String(allowance.remaining),
@@ -82,9 +100,13 @@ export async function POST(request: Request) {
     if (!allowance.allowed) {
       const retryAfter = Math.max(1, Math.ceil((allowance.resetAt - Date.now()) / 1_000));
       return NextResponse.json(
-        { error: "Fresh-answer limit reached. Saved answers remain available; try Refresh again later." },
         {
-          status: 429,
+          error: allowance.unavailable
+            ? "Fresh-answer generation is temporarily unavailable because the production rate limiter is not ready."
+            : "Fresh-answer limit reached. Saved answers remain available; try Refresh again later.",
+        },
+        {
+          status: allowance.unavailable ? 503 : 429,
           headers: { ...rateHeaders, "Retry-After": String(retryAfter) },
         },
       );
@@ -92,8 +114,9 @@ export async function POST(request: Request) {
 
     try {
       const generated = await analyseWithOpenAI(input.part, input.query);
-      const saved = await saveFreshAnswer(identity, generated);
-      return NextResponse.json(saved, { headers: rateHeaders });
+      request.signal.throwIfAborted();
+      const saved = await saveFreshAnswer(identity, generated, { signal: request.signal });
+      return NextResponse.json(saved ?? unsavedGenerated(identity, generated), { headers: rateHeaders });
     } catch (error) {
       console.error("OpenAI analysis failed", error);
       return NextResponse.json(
