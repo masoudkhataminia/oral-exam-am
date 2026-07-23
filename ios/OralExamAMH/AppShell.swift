@@ -29,6 +29,7 @@ private struct AboutView: View {
                 LabeledContent("Format", value: "AHPRA oral practice")
                 LabeledContent("Access", value: "Public — no login")
                 LabeledContent("Connection", value: store.isDemoMode ? "Demo data" : "Secure server")
+                LabeledContent("Developed by", value: "Masoud Khataminia")
             }
             Section("Important") {
                 Text("Educational exam preparation only. Do not enter identifiable patient information.")

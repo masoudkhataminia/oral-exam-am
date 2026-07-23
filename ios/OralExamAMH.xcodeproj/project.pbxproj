@@ -11,6 +11,7 @@
 		6A83D0965513964AE8E9C4D2 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 887008F8441F1245ABC69D6D /* Models.swift */; };
 		6C37DA32BA8F96B01B107BA8 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71222543B423A26C699A41D3 /* Components.swift */; };
 		75829A49C282F0B94A1C70F3 /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 832558723DBA051A3A24C8D2 /* AppStore.swift */; };
+		803E35364A9860C32C57372C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8CC955C02C6B131A14BF1B63 /* Assets.xcassets */; };
 		85B3A38BB2EF9357A2195CFC /* SavedAnswersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9545E3D694BE0AAEC7A45B61 /* SavedAnswersView.swift */; };
 		B2FC500BDAD1985AF164F06F /* PracticeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39280BBB59509CF725864665 /* PracticeView.swift */; };
 		C4C4EE541D54639F38F7E5FB /* AppShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA060F08EF6BC814794633DD /* AppShell.swift */; };
@@ -37,6 +38,7 @@
 		71222543B423A26C699A41D3 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		832558723DBA051A3A24C8D2 /* AppStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
 		887008F8441F1245ABC69D6D /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		8CC955C02C6B131A14BF1B63 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9545E3D694BE0AAEC7A45B61 /* SavedAnswersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedAnswersView.swift; sourceTree = "<group>"; };
 		A622E3814443972174B4DD99 /* AnswerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnswerView.swift; sourceTree = "<group>"; };
 		BA060F08EF6BC814794633DD /* AppShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShell.swift; sourceTree = "<group>"; };
@@ -61,6 +63,7 @@
 				5DFD81D9E9EEE59B8F096B66 /* APIClient.swift */,
 				BA060F08EF6BC814794633DD /* AppShell.swift */,
 				832558723DBA051A3A24C8D2 /* AppStore.swift */,
+				8CC955C02C6B131A14BF1B63 /* Assets.xcassets */,
 				71222543B423A26C699A41D3 /* Components.swift */,
 				887008F8441F1245ABC69D6D /* Models.swift */,
 				ED308E2B7E4A996A7F044A7D /* OralExamAMHApp.swift */,
@@ -113,6 +116,7 @@
 			buildConfigurationList = 1D6EFB67DDF98F26F1B203C8 /* Build configuration list for PBXNativeTarget "OralExamAMH" */;
 			buildPhases = (
 				66D4068786FDD64E18DBAB3A /* Sources */,
+				C89A71DD6116F08B7EDD3301 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -135,10 +139,11 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					437087204B79C19923E72AAF = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 94ST3AMFX7;
 					};
 					445EA5BC772B29B3CB818892 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 94ST3AMFX7;
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -161,6 +166,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C89A71DD6116F08B7EDD3301 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				803E35364A9860C32C57372C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		66D4068786FDD64E18DBAB3A /* Sources */ = {
@@ -250,7 +266,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 94ST3AMFX7;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -307,7 +323,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 94ST3AMFX7;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -358,16 +374,20 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Oral Exam AMH";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = au.com.oralexamh.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -379,16 +399,20 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Oral Exam AMH";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = au.com.oralexamh.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
