@@ -13,9 +13,10 @@ final class AppStore: ObservableObject {
         if let client {
             self.client = client
         } else if
-            let value = Bundle.main.object(forInfoDictionaryKey: "ORAL_EXAM_API_BASE_URL") as? String,
-            let url = URL(string: value),
-            !value.isEmpty
+            let url = URL(
+                string: (Bundle.main.object(forInfoDictionaryKey: "ORAL_EXAM_API_BASE_URL") as? String)
+                    ?? "https://oral.mypharmacyhub.net/"
+            )
         {
             self.client = ServerOralExamClient(baseURL: url)
         } else {
